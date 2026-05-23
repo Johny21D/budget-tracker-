@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Ledger — Monthly Budget</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  :root{
+    --bg:#0a0b0e;
+    --surface:#121419;
+    --surface-2:#161922;
+    --border:rgba(255,255,255,.07);
+    --border-hi:rgba(255,255,255,.14);
+    --text:#f3f4f1;
+    --muted:#868b96;
+    --faint:#5a5f6a;
+    --accent:#c9f24d;
+    --income:#57e3a4;
+    --spend:#ff7d6b;
+  }
+
+  *{ box-sizing:border-box; margin:0; padding:0; }
+
+  html{ -webkit-font-smoothing:antialiased; }
+  body{
+    font-family:'Bricolage Grotesque', sans-serif;
+    color:var(--text);
+    background:
+      radial-gradient(900px 520px at 10% -8%, rgba(201,242,77,.10), transparent 60%),
+      radial-gradient(820px 520px at 102% -2%, rgba(87,227,164,.07), transparent 55%),
+      var(--bg);
+    background-attachment:fixed;
+    min-height:100vh;
+    padding:0 22px 80px;
+    line-height:1.5;
+  }
+  /* grain */
+  body::before{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none; opacity:.045;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .wrap{ position:relative; z-index:1; max-width:880px; margin:0 auto; }
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:22px 0 20px; margin-bottom:34px;
+    border-bottom:1px solid var(--border); gap:16px; flex-wrap:wrap;
+  }
+  .brand{ display:flex; align-items:center; gap:11px; }
+  .mark{
+    width:32px; height:32px; border-radius:9px; background:var(--accent);
+    display:grid; place-items:center; box-shadow:0 0 24px rgba(201,242,77,.35);
+    flex-shrink:0;
+  }
+  .mark svg{ display:block; }
+  .brandname{ font-weight:800; font-size:17px; letter-spacing:-.2px; }
+  .brandname b{ color:var(--accent); font-weight:800; }
+  .actions{ display:flex; gap:10px; flex-wrap:wrap; }
+
+  button{
+    font-family:inherit; font-size:13.5px; font-weight:600; letter-spacing:.1px;
+    padding:10px 17px; border-radius:10px; cursor:pointer; border:1px solid transparent;
+    transition:transform .15s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease;
+  }
+  button.primary{ background:var(--accent); color:#0a0b0e; box-shadow:0 0 0 rgba(201,242,77,0); }
+  button.primary:hover{ transform:translateY(-1px); box-shadow:0 8px 26px rgba(201,242,77,.30); }
+  button.ghost{ background:transparent; color:var(--text); border-color:var(--border-hi); }
+  button.ghost:hover{ border-color:var(--text); transform:translateY(-1px); }
+  button:active{ transform:translateY(0); }
+
+  /* ---------- hero ---------- */
+  .hero{ margin-bottom:34px; }
+  .eyebrow{ font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:3px; color:var(--accent); text-transform:uppercase; }
+  h1{
+    font-weight:800; font-size:clamp(34px,6vw,56px); line-height:1.0; letter-spacing:-1.5px;
+    margin:14px 0 16px; max-width:14ch;
+  }
+  .hero .sub{ font-size:15px; color:var(--muted); max-width:56ch; }
+
+  .privacy{
+    margin-top:18px; display:inline-flex; align-items:center; gap:8px;
+    font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--faint);
+  }
+  .privacy i{ width:6px; height:6px; border-radius:50%; background:var(--income); box-shadow:0 0 10px var(--income); }
+
+  /* ---------- error ---------- */
+  .errorBox{
+    padding:15px 17px; border-radius:12px; font-size:13.5px; margin-bottom:26px;
+    background:rgba(255,125,107,.10); border:1px solid rgba(255,125,107,.35); color:#ffb5aa;
+  }
+
+  /* ---------- stat cards ---------- */
+  .cards{ display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); gap:14px; margin-bottom:18px; }
+  .card{
+    position:relative; overflow:hidden; opacity:0;
+    background:linear-gradient(180deg,var(--surface-2),var(--surface));
+    border:1px solid var(--border); border-radius:18px; padding:20px 20px 18px;
+  }
+  .card::before{
+    content:""; position:absolute; top:-46%; right:-22%; width:170px; height:170px;
+    background:radial-gradient(circle, var(--c,transparent), transparent 70%); opacity:.18;
+  }
+  .card .label{ font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:2px; text-transform:uppercase; color:var(--muted); }
+  .card .num{
+    font-family:'JetBrains Mono',monospace; font-weight:700; font-size:clamp(24px,4.4vw,32px);
+    letter-spacing:-1px; margin:12px 0 6px; font-variant-numeric:tabular-nums;
+  }
+  .card .foot{ font-size:12px; color:var(--faint); }
+
+  /* ---------- tappable cards + drawer ---------- */
+  .hint{ font-family:'JetBrains Mono',monospace; font-size:11.5px; letter-spacing:.5px; color:var(--faint); margin-bottom:14px; }
+  .card.clickable{ cursor:pointer; transition:transform .15s ease, border-color .2s ease, box-shadow .2s ease; }
+  .card.clickable:hover{ transform:translateY(-2px); border-color:var(--border-hi); }
+  .card.clickable:focus-visible{ outline:none; border-color:var(--c); box-shadow:0 0 0 2px var(--c); }
+  .card.active{ border-color:var(--c); box-shadow:inset 0 0 0 1px var(--c), 0 18px 46px -24px var(--c); }
+  .card .label{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .chev{ font-style:normal; font-size:18px; line-height:1; color:var(--faint); transition:transform .25s ease, color .2s ease; }
+  .card.active .chev{ transform:rotate(90deg); color:var(--c); }
+
+  .drawer{ margin-bottom:42px; }
+  .panel{
+    background:var(--surface); border:1px solid var(--border); border-radius:18px;
+    padding:20px 20px 10px; animation:rise .4s cubic-bezier(.2,.7,.2,1) both;
+  }
+  .panel .phead{ display:flex; align-items:baseline; justify-content:space-between; gap:14px; margin-bottom:16px; }
+  .panel .phead h3{ font-weight:600; font-size:17px; letter-spacing:-.3px; }
+  .panel .phead .psum{ font-family:'JetBrains Mono',monospace; font-size:12.5px; color:var(--muted); white-space:nowrap; }
+  .panel .table{ background:transparent; border:none; border-radius:0; }
+  .panel .catWrap{ margin-bottom:6px; }
+  .panel .note{ font-size:12.5px; color:var(--faint); padding:4px 0 14px; }
+  .empty{ color:var(--muted); font-size:13.5px; line-height:1.6; padding:4px 0 16px; }
+
+  /* ---------- people rows ---------- */
+  .person{
+    display:grid; grid-template-columns:1fr auto; gap:2px 14px; align-items:center;
+    padding:15px 0; border-bottom:1px solid var(--border);
+    animation:rise .45s cubic-bezier(.2,.7,.2,1) both;
+  }
+  .person:last-child{ border-bottom:none; }
+  .person .pname{ font-weight:600; font-size:15px; }
+  .person .pmeta{ font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--faint); }
+  .person .right{ text-align:right; }
+  .person .powes{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:16px; font-variant-numeric:tabular-nums; }
+  .person .ptag{ font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:.5px; text-transform:uppercase; }
+
+  /* ---------- section header ---------- */
+  .sec{ margin-bottom:18px; }
+  .sec .eyebrow{ color:var(--muted); }
+  .sec h2{ font-weight:600; font-size:21px; letter-spacing:-.4px; margin-top:4px; }
+
+  /* ---------- categories ---------- */
+  .catWrap{ margin-bottom:48px; }
+  .catRow{ margin-bottom:17px; animation:rise .5s cubic-bezier(.2,.7,.2,1) both; }
+  .catTop{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+  .catLabel{ display:flex; align-items:center; gap:9px; font-size:14px; font-weight:500; }
+  .dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .catAmt{ font-family:'JetBrains Mono',monospace; font-size:13.5px; font-variant-numeric:tabular-nums; }
+  .catAmt em{ font-style:normal; color:var(--faint); margin-left:9px; font-size:12px; }
+  .track{ height:7px; background:rgba(255,255,255,.06); border-radius:20px; overflow:hidden; }
+  .fill{ height:100%; width:0; border-radius:20px; transition:width .85s cubic-bezier(.2,.8,.2,1); }
+
+  /* ---------- transactions ---------- */
+  .table{ background:var(--surface); border:1px solid var(--border); border-radius:18px; overflow:hidden; }
+  .txRow{
+    display:grid; grid-template-columns:96px 1fr auto auto; gap:14px; align-items:center;
+    padding:13px 18px; border-bottom:1px solid var(--border); font-size:13.5px;
+    animation:rise .45s cubic-bezier(.2,.7,.2,1) both; transition:background .15s ease;
+  }
+  .txRow:last-child{ border-bottom:none; }
+  .txRow:hover{ background:rgba(255,255,255,.025); }
+  .txDate{ font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--faint); white-space:nowrap; }
+  .txName{ font-weight:500; }
+  .chip{
+    display:inline-flex; align-items:center; gap:7px; font-size:11.5px; font-weight:500;
+    padding:4px 11px 4px 9px; border-radius:20px; white-space:nowrap;
+  }
+  .txAmt{ font-family:'JetBrains Mono',monospace; font-weight:500; text-align:right; font-variant-numeric:tabular-nums; min-width:92px; }
+
+  .hidden{ display:none; }
+
+  /* ---------- reveal ---------- */
+  @keyframes rise{ from{ opacity:0; transform:translateY(12px); } to{ opacity:1; transform:translateY(0); } }
+  #results.show .card{ animation:rise .6s cubic-bezier(.2,.7,.2,1) both; }
+  #results.show .card:nth-child(1){ animation-delay:.04s; }
+  #results.show .card:nth-child(2){ animation-delay:.12s; }
+  #results.show .card:nth-child(3){ animation-delay:.20s; }
+
+  @media (max-width:560px){
+    .cards{ grid-template-columns:1fr; }
+    .txRow{ grid-template-columns:1fr auto; row-gap:6px; padding:14px 16px; }
+    .txDate{ grid-column:1; }
+    .chip{ grid-column:1; justify-self:start; }
+    .txName{ grid-column:1 / -1; order:-1; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- top bar -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 16 16">
+          <rect x="1"  y="9" width="3.4" height="6" rx="1" fill="#0a0b0e"/>
+          <rect x="6.3" y="5" width="3.4" height="10" rx="1" fill="#0a0b0e"/>
+          <rect x="11.6" y="2" width="3.4" height="13" rx="1" fill="#0a0b0e"/>
+        </svg>
+      </span>
+      <span class="brandname">Ledger<b>.</b></span>
+    </div>
+    <div class="actions">
+      <button class="primary" id="uploadBtn">Open bank file</button>
+      <button class="ghost" id="sampleBtn">Try a sample</button>
+      <input type="file" id="fileInput" accept=".csv,.xlsx,.xls" class="hidden" />
+    </div>
+  </header>
+
+  <!-- hero -->
+  <section class="hero">
+    <span class="eyebrow">Monthly overview</span>
+    <h1>Where did the money go?</h1>
+    <p class="sub">
+      Drop in a bank statement &mdash; CSV or Excel &mdash; and Ledger sorts every transaction
+      into categories, then shows what came in versus what went out.
+    </p>
+    <div class="privacy"><i></i> Runs entirely in your browser. Your file never leaves this device.</div>
+  </section>
+
+  <div id="error" class="errorBox hidden"></div>
+
+  <!-- dashboard -->
+  <div id="results" class="hidden">
+    <p class="hint" id="hint">Tap a card to see the detail behind it.</p>
+    <div class="cards">
+      <div class="card clickable" data-panel="earned" tabindex="0" role="button" style="--c:var(--income)">
+        <div class="label">Earned <span class="chev">&rsaquo;</span></div>
+        <div class="num" id="earned" style="color:var(--income)">$0.00</div>
+        <div class="foot">money in</div>
+      </div>
+      <div class="card clickable" data-panel="spent" tabindex="0" role="button" style="--c:var(--spend)">
+        <div class="label">Spent <span class="chev">&rsaquo;</span></div>
+        <div class="num" id="spent" style="color:var(--spend)">$0.00</div>
+        <div class="foot">money out</div>
+      </div>
+      <div class="card clickable" data-panel="net" tabindex="0" role="button" style="--c:var(--accent)">
+        <div class="label">Net <span class="chev">&rsaquo;</span></div>
+        <div class="num" id="net">$0.00</div>
+        <div class="foot">in &minus; out</div>
+      </div>
+      <div class="card clickable" data-panel="people" tabindex="0" role="button" style="--c:#c79bff">
+        <div class="label">Lent out <span class="chev">&rsaquo;</span></div>
+        <div class="num" id="lent" style="color:#c79bff">$0.00</div>
+        <div class="foot">sent to people</div>
+      </div>
+    </div>
+
+    <div id="drawer" class="drawer"></div>
+  </div>
+</div>
+
+<script>
+// ---- Category rules: keyword -> category. Edit these to fit your bank. ----
+const RULES = [
+  { cat: "Groceries",     words: ["walmart","wal-mart","smiths","winco","costco","kroger","albertsons","grocery","food market","trader joe","whole foods","h mart","asian city","market"] },
+  { cat: "Dining Out",    words: ["chick-fil-a","mcdonald","panda","crumbl","starbucks","restaurant","cafe","pizza","taco","burger","grill","subway","wendy","chipotle","dunkin","sugarbeast"] },
+  { cat: "Transport",     words: ["shell","chevron","maverik","exxon","gas","fuel","uber","lyft","parking","auto"] },
+  { cat: "Subscriptions", words: ["netflix","spotify","hulu","disney","youtube","apple.com","prime","subscription","adobe","anthropic","claude.ai"] },
+  { cat: "Education",     words: ["brigham young","byu","university","tuition","bookstore","campus"] },
+  { cat: "Housing",       words: ["rent","apartment","mortgage","property","lease"] },
+  { cat: "Utilities",     words: ["utility","power","electric","water","gas company","internet","wifi","phone","verizon","at&t","t-mobile"] },
+  { cat: "Transfers",     words: ["venmo","zelle","paypal","cash app","transfer","atm","funds transferred"] },
+  { cat: "Shopping",      words: ["amazon","amzn","target","best buy","ebay","etsy","store"] },
+];
+
+// Category accent colors, tuned for a dark background.
+const STYLES = {
+  Income:        { color:"#57e3a4" },
+  Groceries:     { color:"#ffb454" },
+  "Dining Out":  { color:"#ff7d6b" },
+  Transport:     { color:"#5fb2ff" },
+  Subscriptions: { color:"#c79bff" },
+  Education:     { color:"#5fe0cf" },
+  Housing:       { color:"#b8d95a" },
+  Utilities:     { color:"#4fd1c5" },
+  Transfers:     { color:"#9aa0ab" },
+  Shopping:      { color:"#ff8fc8" },
+  Other:         { color:"#9aa0ab" },
+};
+
+const SAMPLE = `Date,Description,Amount
+2026-05-01,DIRECT DEP EMPLOYER PAYROLL,2150.00
+2026-05-02,WALMART SUPERCENTER #1042,-86.34
+2026-05-03,SHELL OIL 57442198,-41.20
+2026-05-04,NETFLIX.COM,-15.49
+2026-05-05,CHICK-FIL-A #00231,-12.85
+2026-05-06,AMZN MKTP US*2A4XY,-58.99
+2026-05-08,SMITHS FOOD #441,-103.77
+2026-05-09,SPOTIFY USA,-10.99
+2026-05-10,VENMO PAYMENT JADEN,-25.00
+2026-05-11,MAVERIK #312 REXBURG,-39.10
+2026-05-12,COSTCO WHSE #0398,-142.66
+2026-05-14,CHEVRON 0094213,-44.30
+2026-05-15,DIRECT DEP EMPLOYER PAYROLL,2150.00
+2026-05-16,PANDA EXPRESS 2841,-14.20
+2026-05-18,AMAZON.COM*MK21Z,-32.40
+2026-05-19,BROADWAY APARTMENTS RENT,-650.00
+2026-05-20,WINCO FOODS REXBURG,-91.55
+2026-05-22,CRUMBL COOKIES,-13.00
+2026-05-23,UTILITY PWR LIGHT AUTOPAY,-78.40
+2026-05-25,STARBUCKS #5521,-6.75
+2026-05-13,FUNDS TRANSFERRED TO MARIA LOPEZ 8842,-120.00
+2026-05-17,ZELLE FROM JADEN,15.00
+2026-05-21,FUNDS TRANSFERRED TO MARIA LOPEZ 8842,-60.00`;
+
+const fmt = n => n.toLocaleString("en-US", { style:"currency", currency:"USD" });
+
+function hexToRgba(hex, a){
+  const h = hex.replace('#','');
+  const r = parseInt(h.substring(0,2),16), g = parseInt(h.substring(2,4),16), b = parseInt(h.substring(4,6),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+// Count-up animation for the headline figures.
+function animateValue(el, to, opts){
+  opts = opts || {};
+  const dur = 850, t0 = performance.now();
+  function step(now){
+    let t = Math.min(1, (now - t0) / dur);
+    t = 1 - Math.pow(1 - t, 3); // easeOutCubic
+    const v = to * t;
+    el.textContent = (opts.sign ? (v >= 0 ? "+" : "-") : "") + fmt(Math.abs(v));
+    if (t < 1) requestAnimationFrame(step);
+    else el.textContent = (opts.sign ? (to >= 0 ? "+" : "-") : "") + fmt(Math.abs(to));
+  }
+  requestAnimationFrame(step);
+}
+
+function categorize(desc, amount) {
+  if (amount > 0) return "Income";
+  const d = desc.toLowerCase();
+  for (const rule of RULES) {
+    if (rule.words.some(w => d.includes(w))) return rule.cat;
+  }
+  return "Other";
+}
+
+function cleanName(desc) {
+  let n = desc.trim();
+  // Bank-specific verbose formats first:
+  // "PURCHASE AT SQ *SUGARBEAST,Rexburg Rexburg-No:..."  -> "Sugarbeast"
+  let m = n.match(/PURCHASE AT\s+(?:SQ\s*\*)?([^,]+?)(?:,|-No:|$)/i);
+  if (m) n = m[1];
+  // "FUNDS TRANSFERRED TO NAME ..." -> "Funds Transferred"
+  else if (/FUNDS TRANSFERRED/i.test(n)) n = "Funds Transferred";
+  // Generic cleanup: cut at #/* or long digit runs, drop filler words
+  n = n.replace(/[#*].*$/, "").replace(/\d{4,}.*$/, "").trim();
+  n = n.replace(/\b(payment|usa|us|inc|co|llc|autopay|visa)\b/gi, "").trim();
+  if (!n) n = desc;
+  return n.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function showError(msg) {
+  const e = document.getElementById("error");
+  e.textContent = msg;
+  e.classList.remove("hidden");
+  document.getElementById("results").classList.add("hidden");
+}
+
+// Holds the latest parsed data so the drawer can rebuild detail on demand.
+let LAST = { rows: [], income: 0, expenses: 0, byCat: {}, people: { list: [], totalLent: 0 } };
+let ACTIVE = null;
+
+// Pull a person's name out of a transfer-type transaction, if there is one.
+function extractPerson(r) {
+  const d = r.description.toUpperCase();
+  if (!/(FUNDS TRANSFERRED|WIRE|TRANSFER|VENMO|ZELLE|CASH ?APP|PAYPAL)/.test(d)) return null;
+  let m = d.match(/\b(?:TO|FROM)\s+([A-Z][A-Z'.\-]*(?:\s+[A-Z][A-Z'.\-]*){0,3})/);
+  if (!m) m = d.match(/(?:VENMO|ZELLE|CASH ?APP|PAYPAL)\s*(?:PAYMENT|TRANSFER|TO|FROM)?\s*([A-Z][A-Z'.\-]+(?:\s+[A-Z][A-Z'.\-]+){0,2})/);
+  let name = (m ? m[1] : "").replace(/\b(PAYMENT|TRANSFER|TRANSFERRED|FUNDS|ACCOUNT|ACCT|REF|NO)\b/g, "").trim();
+  if (!name) name = "Unknown";
+  name = name.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+  return { name, dir: r.amount < 0 ? "out" : "in", amount: Math.abs(r.amount) };
+}
+
+// Group transfers by person: sent (out), received back (in), and net owed.
+function buildPeople(rows) {
+  const map = {};
+  rows.forEach(r => {
+    const p = extractPerson(r);
+    if (!p) return;
+    map[p.name] = map[p.name] || { name: p.name, sent: 0, received: 0 };
+    if (p.dir === "out") map[p.name].sent += p.amount;
+    else map[p.name].received += p.amount;
+  });
+  const list = Object.values(map)
+    .map(p => ({ ...p, net: p.sent - p.received }))
+    .sort((a, b) => b.sent - a.sent);
+  return { list, totalLent: list.reduce((s, p) => s + p.sent, 0) };
+}
+
+function render(rows) {
+  document.getElementById("error").classList.add("hidden");
+  let income = 0, expenses = 0;
+  const byCat = {};
+  rows.forEach(r => {
+    if (r.amount > 0) income += r.amount;
+    else { expenses += Math.abs(r.amount); byCat[r.category] = (byCat[r.category]||0) + Math.abs(r.amount); }
+  });
+  const net = income - expenses;
+  const people = buildPeople(rows);
+  LAST = { rows, income, expenses, byCat, people };
+
+  const res = document.getElementById("results");
+  res.classList.remove("hidden");
+  void res.offsetWidth;            // force reflow so card reveal replays
+  res.classList.add("show");
+
+  animateValue(document.getElementById("earned"), income, {});
+  animateValue(document.getElementById("spent"), expenses, {});
+  const netEl = document.getElementById("net");
+  netEl.style.color = net >= 0 ? "var(--income)" : "var(--spend)";
+  animateValue(netEl, net, { sign:true });
+  animateValue(document.getElementById("lent"), people.totalLent, {});
+
+  closeDrawer();
+}
+
+// ---- drawer / detail panels ----
+function openPanel(which) {
+  if (ACTIVE === which) { closeDrawer(); return; }
+  ACTIVE = which;
+  document.querySelectorAll(".card.clickable").forEach(c =>
+    c.classList.toggle("active", c.dataset.panel === which));
+  document.getElementById("hint").style.visibility = "hidden";
+  const d = document.getElementById("drawer");
+  d.innerHTML = panelHTML(which);
+  d.querySelectorAll(".fill").forEach(f =>
+    requestAnimationFrame(() => { f.style.width = f.dataset.w + "%"; }));
+}
+
+function closeDrawer() {
+  ACTIVE = null;
+  document.querySelectorAll(".card.clickable").forEach(c => c.classList.remove("active"));
+  const hint = document.getElementById("hint");
+  if (hint) hint.style.visibility = "visible";
+  document.getElementById("drawer").innerHTML = "";
+}
+
+function txListHTML(rows) {
+  if (!rows.length) return '<div class="empty">Nothing here for this period.</div>';
+  return '<div class="table">' + rows.map((r, i) => {
+    const color = (STYLES[r.category] || STYLES.Other).color;
+    const amtColor = r.amount > 0 ? "var(--income)" : "var(--text)";
+    return '<div class="txRow" style="animation-delay:' + Math.min(i*20,420) + 'ms">' +
+      '<span class="txDate">' + r.date + '</span>' +
+      '<span class="txName">' + cleanName(r.description) + '</span>' +
+      '<span class="chip" style="color:' + color + ';background:' + hexToRgba(color,.13) + '"><i class="dot" style="background:' + color + '"></i>' + r.category + '</span>' +
+      '<span class="txAmt" style="color:' + amtColor + '">' + (r.amount>0?'+':'') + fmt(r.amount) + '</span>' +
+    '</div>';
+  }).join("") + '</div>';
+}
+
+function catsHTML() {
+  const cats = Object.entries(LAST.byCat).sort((a,b) => b[1]-a[1]);
+  if (!cats.length) return "";
+  return '<div class="catWrap">' + cats.map(([cat, amt], i) => {
+    const color = (STYLES[cat] || STYLES.Other).color;
+    const pct = LAST.expenses ? (amt/LAST.expenses)*100 : 0;
+    return '<div class="catRow" style="animation-delay:' + (i*55) + 'ms">' +
+      '<div class="catTop"><span class="catLabel"><i class="dot" style="background:' + color + '"></i>' + cat + '</span>' +
+      '<span class="catAmt">' + fmt(amt) + '<em>' + pct.toFixed(0) + '%</em></span></div>' +
+      '<div class="track"><div class="fill" data-w="' + pct + '" style="background:linear-gradient(90deg,' + hexToRgba(color,.5) + ',' + color + ')"></div></div>' +
+    '</div>';
+  }).join("") + '</div>';
+}
+
+function peopleHTML() {
+  const list = LAST.people.list;
+  if (!list.length) return '<div class="empty">No person-to-person transfers found yet. These appear when a transfer line names someone &mdash; e.g. &ldquo;FUNDS TRANSFERRED TO JANE DOE&rdquo; or &ldquo;VENMO PAYMENT JADEN&rdquo;.</div>';
+  return list.map((p, i) => {
+    let tag, owesStr, col;
+    if (p.net > 0)      { col = "var(--income)"; tag = "owes you";  owesStr = fmt(p.net); }
+    else if (p.net < 0) { col = "var(--spend)";  tag = "you owe";   owesStr = fmt(Math.abs(p.net)); }
+    else                { col = "var(--faint)";  tag = "settled";   owesStr = fmt(0); }
+    const meta = "sent " + fmt(p.sent) + (p.received ? " &middot; paid back " + fmt(p.received) : "");
+    return '<div class="person" style="animation-delay:' + (i*50) + 'ms">' +
+      '<div><div class="pname">' + p.name + '</div><div class="pmeta">' + meta + '</div></div>' +
+      '<div class="right"><div class="powes" style="color:' + col + '">' + owesStr + '</div>' +
+      '<div class="ptag" style="color:' + col + '">' + tag + '</div></div>' +
+    '</div>';
+  }).join("");
+}
+
+function panel(title, meta, body) {
+  return '<div class="panel"><div class="phead"><h3>' + title + '</h3>' +
+    (meta ? '<span class="psum">' + meta + '</span>' : '') + '</div>' + body + '</div>';
+}
+
+function panelHTML(which) {
+  if (which === "earned") {
+    const inc = LAST.rows.filter(r => r.amount > 0);
+    return panel("Money in", inc.length + (inc.length===1?" deposit":" deposits"), txListHTML(inc));
+  }
+  if (which === "spent") {
+    const exp = LAST.rows.filter(r => r.amount < 0);
+    return panel("Where it went", exp.length + " purchases", catsHTML() + txListHTML(exp));
+  }
+  if (which === "net") {
+    return panel("All transactions", LAST.rows.length + " total", txListHTML(LAST.rows));
+  }
+  if (which === "people") {
+    const note = '<div class="note">Money you sent to people, counted as lent. Anything they send back is subtracted, so the figure on the right is what they still owe you.</div>';
+    return panel("Sent to people", fmt(LAST.people.totalLent) + " lent", note + peopleHTML());
+  }
+  return "";
+}
+
+// Find the header row in a 2D array (some banks put blank/title rows on top).
+// Returns { fields: [...headerNames], dataRows: [ {colName: value}, ... ] }.
+function buildFromMatrix(matrix) {
+  const looksLikeHeader = row => {
+    const cells = row.map(c => String(c).toLowerCase());
+    const hasDate = cells.some(c => c.includes("date"));
+    const hasMoney = cells.some(c =>
+      ["amount","amt","debit","credit","money","value","withdraw","deposit"].some(k => c.includes(k)));
+    const hasDesc = cells.some(c =>
+      ["description","detail","merchant","memo","payee","narration","name"].some(k => c.includes(k)));
+    return hasDate && (hasMoney || hasDesc);
+  };
+  let hi = matrix.findIndex(looksLikeHeader);
+  if (hi === -1) hi = 0; // fall back to first row
+  const header = matrix[hi].map(c => String(c).trim());
+  // De-duplicate blank/repeated header names (e.g. two "Ccy" columns)
+  const seen = {};
+  const fields = header.map((h, i) => {
+    let name = h || ("col" + i);
+    if (seen[name] != null) name = name + "_" + (++seen[h]); else seen[name] = 1;
+    return name;
+  });
+  const dataRows = matrix.slice(hi + 1).map(row => {
+    const obj = {};
+    fields.forEach((f, i) => { obj[f] = row[i] != null ? row[i] : ""; });
+    return obj;
+  });
+  return { fields, dataRows };
+}
+
+// Shared: take row-objects + their column names and process them.
+function processRows(dataRows, fieldNames) {
+  const fields = fieldNames.map(f => String(f).toLowerCase().trim());
+  const find = (...names) => fieldNames[fields.findIndex(f => names.some(n => f.includes(n)))];
+
+  const dateCol = find("date","posted");
+  const descCol = find("description","detail","merchant","name","memo","payee","narration");
+  // Either a single signed amount column...
+  const amtCol  = find("amount","amt","value");
+  // ...or separate "money in" / "money out" (a.k.a. credit / debit) columns.
+  const inCol   = find("money in","deposit","credit","paid in","cr");
+  const outCol  = find("money out","withdraw","debit","paid out","dr");
+
+  if (!dateCol || !descCol || (!amtCol && !(inCol || outCol)))
+    throw new Error("Couldn't find the Date, Description, and Amount columns in this file. " +
+                    "If your bank splits money into separate columns, those should be named " +
+                    "something like \"Money In\" and \"Money Out\".");
+
+  const num = v => {
+    const n = parseFloat(String(v).replace(/[$,\s]/g, ""));
+    return isNaN(n) ? 0 : n;
+  };
+
+  const rows = dataRows
+    .map(r => {
+      let amount;
+      if (amtCol) {
+        amount = num(r[amtCol]);
+      } else {
+        // Money In is income (+), Money Out is spending (-)
+        amount = (inCol ? num(r[inCol]) : 0) - (outCol ? num(r[outCol]) : 0);
+      }
+      return { date: String(r[dateCol]).trim(), description: String(r[descCol]).trim(), amount };
+    })
+    .filter(r => r.description && r.amount !== 0)
+    .map(r => ({ ...r, category: categorize(r.description, r.amount) }));
+
+  if (!rows.length) throw new Error("No valid transactions found in that file.");
+  render(rows);
+}
+
+// Reader for CSV text (and the sample data) — parse as a matrix so we can
+// skip any blank/title rows above the real header.
+function ingest(csvText) {
+  Papa.parse(csvText, {
+    header: false, skipEmptyLines: true,
+    complete: (res) => {
+      try {
+        const matrix = res.data.filter(row => row.some(c => String(c).trim() !== ""));
+        if (!matrix.length) throw new Error("That file looks empty.");
+        const { fields, dataRows } = buildFromMatrix(matrix);
+        processRows(dataRows, fields);
+      } catch (e) { showError(e.message); }
+    },
+    error: (e) => showError("Couldn't read that file: " + e.message)
+  });
+}
+
+// Reader for Excel files (.xlsx / .xls)
+function ingestExcel(arrayBuffer) {
+  try {
+    const wb = XLSX.read(arrayBuffer, { type: "array" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    // header:1 gives an array-of-arrays, so blank top rows don't break anything.
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" })
+      .filter(row => row.some(c => String(c).trim() !== ""));
+    if (!matrix.length) throw new Error("That spreadsheet looks empty.");
+    const { fields, dataRows } = buildFromMatrix(matrix);
+    processRows(dataRows, fields);
+  } catch (e) { showError(e.message); }
+}
+
+document.getElementById("uploadBtn").addEventListener("click", () => document.getElementById("fileInput").click());
+document.getElementById("sampleBtn").addEventListener("click", () => ingest(SAMPLE));
+
+// Tap (or Enter/Space) a card to open its detail in the drawer.
+document.querySelectorAll(".card.clickable").forEach(card => {
+  card.addEventListener("click", () => openPanel(card.dataset.panel));
+  card.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPanel(card.dataset.panel); }
+  });
+});
+document.getElementById("fileInput").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  if (/\.xlsx?$/i.test(file.name)) {
+    reader.onload = ev => ingestExcel(ev.target.result);
+    reader.readAsArrayBuffer(file);
+  } else {
+    reader.onload = ev => ingest(ev.target.result);
+    reader.readAsText(file);
+  }
+});
+</script>
+</body>
+</html>
